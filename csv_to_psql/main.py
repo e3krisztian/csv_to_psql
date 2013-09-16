@@ -11,14 +11,6 @@ import argparse
 from ConfigParser import ConfigParser
 
 
-SQL_TEMPLATE = '''\
--- exit on any error, to prevent damage
-\\set ON_ERROR_STOP on
-{create_table}
-\\copy {table}({columns}) from stdin with csv header {notnullclause}
-'''
-
-
 class ConfigurationError(Exception):
     ''' I am to notify the user that
     the fields-meta file is not correct '''
@@ -68,7 +60,7 @@ class FieldsMeta(object):
     def _get_value(self, field, key, default):
         field_section = self.FIELD_PREFIX + field
 
-        if self.config.has_section(field_section):
+        if self.config.has_option(field_section, key):
             return self.config.get(field_section, key)
 
         return self.config.defaults().get(key, default)
@@ -122,7 +114,15 @@ def create_table(table_name, field_names, fields_meta, primary_key_fields):
             fielddefs + primary_key_constraint))
 
 
-def main(argv, stdin, stdout):
+SQL_TEMPLATE = '''\
+-- exit on any error, to prevent damage
+\\set ON_ERROR_STOP on
+{create_table}
+\\copy {table}({columns}) from stdin with csv header {notnullclause}
+'''
+
+
+def main(argv=sys.argv[1:], stdin=sys.stdin, stdout=sys.stdout):
     args = parse_args(argv)
 
     fields_ini = ConfigParser()
@@ -141,7 +141,7 @@ def main(argv, stdin, stdout):
     create_table_sql = ''
     if args.create_table:
         create_table_sql = create_table(
-            args.table_name, header, fields_meta, args.primary_key_fields)
+            args.table_name, header, fields_meta, args.primary_key)
 
     notnullclause = ''
     if notnullcolumns:
@@ -161,4 +161,5 @@ def main(argv, stdin, stdout):
 
 
 if __name__ == '__main__':
-    main(sys.argv[1:], sys.stdin, sys.stdout)
+    # tested, see Test_script_csv_to_postgres.test
+    main()  # pragma: nocover

@@ -1,13 +1,11 @@
-from testtools import TestCase, skip
+from testtools import TestCase
+# from testtools import skip
 import fixtures
 import textwrap
 from ConfigParser import ConfigParser
 from StringIO import StringIO
 import csv_to_psql.main as m
-
-# empty test to warn developers about untested code when running tox/coverage
-
-__all__ = ['m']
+import subprocess
 
 
 class Test_parse_args(TestCase):
@@ -127,6 +125,18 @@ class Test_TableMeta(TestCase):
             ''')
         self.assertRaises(m.ConfigurationError, meta.is_nullable, 'a_field')
 
+    def test__get_value_missing_value_in_section_inherits_from_DEFAULT(self):
+        meta = get_fields_meta(
+            '''\
+            [DEFAULT]
+            not_in_a: value4notina
+            [field:a]
+            type: int
+            ''')
+        self.assertEqual(
+            'value4notina',
+            meta._get_value('a', 'not_in_a', 'default'))
+
 
 class Test_create_table(TestCase):
 
@@ -176,28 +186,96 @@ class Test_create_table(TestCase):
         self.assertIn('    PRIMARY KEY (a, c)', sql)
 
 
+import os
+import tempfile
+
+
+class File(fixtures.Fixture):
+
+    def __init__(self, content):
+        self.content = content
+        self.path = None
+
+    def setUp(self):
+        super(File, self).setUp()
+        fd, self.path = tempfile.mkstemp()
+        self.addCleanup(os.remove, self.path)
+        try:
+            os.write(fd, self.content)
+        finally:
+            os.close(fd)
+
+
 TEST_CSV = '''\
 a,b,c
 1,2,3
 4,5,6
 '''
 
+TEST_FIELDS_META = b'''\
+[field:a]
+nullable: false
+
+[field:b]
+type: qwertype
+'''
+
 
 class Test_main(TestCase):
 
-    def call(self, argv, stdin):
+    def call_main(self, argv, stdin):
         stdout = StringIO()
         m.main(argv, StringIO(stdin), stdout)
         return stdout.getvalue().replace('\r', '')
 
     def test_input_is_duplicated_in_output(self):
-        stdout = self.call(['MAGIC.tablename'], TEST_CSV)
+        stdout = self.call_main(['MAGIC.tablename'], TEST_CSV)
         self.assertIn(TEST_CSV, stdout)
+
+    def test_fields_meta_is_read(self):
+        fields_meta = self.useFixture(File(TEST_FIELDS_META))
+
+        argv = [
+            'MAGIC.tablename',
+            '--create-table',
+            '--fields-meta=' + fields_meta.path]
+        stdout = self.call_main(argv, TEST_CSV)
+
+        self.assertIn('qwertype', stdout)
+
+    def test_null_values_on_import_are_allowed_by_default(self):
+        stdout = self.call_main(['MAGIC.tablename'], TEST_CSV)
         self.assertNotIn('force not null', stdout)
 
-    @skip('Work in progress - see tox output for missing coverage')
-    def test_fields_meta_is_read(self):
-        self.useFixture()
-        stdout = self.call(['MAGIC.tablename'], TEST_CSV)
-        self.assertIn(TEST_CSV, stdout)
-        self.assertNotIn('force not null', stdout)
+    def test_null_values_can_be_avoided_by_defining_fields_non_nullable(self):
+        fields_meta = self.useFixture(File(TEST_FIELDS_META))
+
+        argv = [
+            'MAGIC.tablename',
+            '--fields-meta=' + fields_meta.path]
+        stdout = self.call_main(argv, TEST_CSV)
+
+        self.assertIn('force not null', stdout)
+
+
+class Test_script_csv_to_postgres(TestCase):
+
+    def test(self):
+        # Note, that this test does not mean
+        # that the script will properly import into postgres:
+        # integration with postgres's psql is not covered
+
+        fields_meta = self.useFixture(File(TEST_FIELDS_META))
+        stdin_file = self.useFixture(File(TEST_CSV.encode('utf8')))
+
+        argv = [
+            'csv_to_psql',
+            'MAGIC.tablename',
+            '--create-table',
+            '--fields-meta=' + fields_meta.path]
+        with open(stdin_file.path) as stdin:
+            stdout = subprocess.check_output(argv, stdin=stdin).decode('utf8')
+
+        self.assertIn('CREATE TABLE MAGIC.tablename', stdout)
+        self.assertIn('qwertype', stdout)
+        self.assertIn(TEST_CSV, stdout.replace('\r', ''))
