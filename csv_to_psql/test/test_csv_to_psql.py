@@ -43,28 +43,36 @@ class Test_parse_args(TestCase):
         args = m.parse_args('test.table'.split())
         self.assertIsNone(args.fields_meta)
 
+    def test_extra_parameters(self):
+        args = m.parse_args(
+            'test.table --param key1 value1 --param key2 value2'.split())
+        self.assertEqual([['key1', 'value1'], ['key2', 'value2']], args.params)
+
     def test_all_parameters(self):
         argv = [
             'test_table',
             '--create-table',
             '--primary-key=pkfield',
             '--fields=somedef.ini',
+            '--param', 'k1', 'v1',
+            '--param', 'k2', 'v2',
         ]
         args = m.parse_args(argv)
         self.assertEquals('test_table', args.table_name)
         self.assertTrue(args.create_table)
         self.assertEqual(['pkfield'], args.primary_key)
         self.assertEqual('somedef.ini', args.fields_meta)
+        self.assertEqual([['k1', 'v1'], ['k2', 'v2']], args.params)
 
 
-def get_fields_meta(ini_content):
+def get_fields_meta(ini_content, params=None):
     fake_file = StringIO(textwrap.dedent(ini_content))
     config = ConfigParser()
     config.readfp(fake_file)
-    return m.FieldsMeta(config)
+    return m.FieldsMeta(config, params)
 
 
-class Test_TableMeta(TestCase):
+class Test_FieldsMeta(TestCase):
 
     def test_fields(self):
         meta = get_fields_meta(
@@ -136,6 +144,22 @@ class Test_TableMeta(TestCase):
         self.assertEqual(
             'value4notina',
             meta._get_value('a', 'not_in_a', 'default'))
+
+    def test__get_value_interpolates(self):
+        meta = get_fields_meta(
+            '''\
+            [DEFAULT]
+            interpolated: x%(key1)sx
+            [field:a]
+            type: %(key2)s.something
+            ''',
+            dict(key1='stuff', key2='volatile'))
+        self.assertEqual(
+            'volatile.something',
+            meta._get_value('a', 'type', 'default'))
+        self.assertEqual(
+            'xstuffx',
+            meta._get_value('a', 'interpolated', 'default'))
 
 
 class Test_create_table(TestCase):
@@ -220,6 +244,14 @@ nullable: false
 type: qwertype
 '''
 
+TEST_INTERPOLATED_FIELDS_META = b'''\
+[field:a]
+nullable: false
+
+[field:b]
+type: %(schema)s.qwertype
+'''
+
 
 class Test_main(TestCase):
 
@@ -256,6 +288,18 @@ class Test_main(TestCase):
         stdout = self.call_main(argv, TEST_CSV)
 
         self.assertIn('force not null', stdout)
+
+    def test_interpolation_in_fields_meta(self):
+        fields_meta = self.useFixture(File(TEST_INTERPOLATED_FIELDS_META))
+
+        argv = [
+            'MAGIC.tablename',
+            '--create-table',
+            '--fields-meta=' + fields_meta.path,
+            '--param', 'schema', 'asd']
+        stdout = self.call_main(argv, TEST_CSV)
+
+        self.assertIn('asd.qwertype', stdout)
 
 
 class Test_script_csv_to_postgres(TestCase):

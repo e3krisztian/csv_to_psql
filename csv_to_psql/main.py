@@ -25,6 +25,7 @@ def parse_args(argv):
     ''' I am parsing the command line parameters '''
     parser = argparse.ArgumentParser()
     parser.add_argument('table_name')
+
     parser.add_argument('--create-table', action='store_true')
 
     def split_on_comma(arg):
@@ -34,6 +35,9 @@ def parse_args(argv):
 
     parser.add_argument(
         '--fields-meta', '--fields', action='store')
+
+    parser.add_argument(
+        '--param', dest='params', default=[], action='append', nargs=2)
 
     return parser.parse_args(argv)
 
@@ -46,8 +50,9 @@ class FieldsMeta(object):
     KEY_TYPE = 'type'
     KEY_NULLABLE = 'nullable'
 
-    def __init__(self, config):
+    def __init__(self, config, params):
         self.config = config
+        self.params = params
 
     @property
     def fields(self):
@@ -61,7 +66,7 @@ class FieldsMeta(object):
         field_section = self.FIELD_PREFIX + field
 
         if self.config.has_option(field_section, key):
-            return self.config.get(field_section, key)
+            return self.config.get(field_section, key, vars=self.params)
 
         return self.config.defaults().get(key, default)
 
@@ -128,7 +133,7 @@ def main(argv=sys.argv[1:], stdin=sys.stdin, stdout=sys.stdout):
     fields_ini = ConfigParser()
     if args.fields_meta:
         fields_ini.read(args.fields_meta)
-    fields_meta = FieldsMeta(fields_ini)
+    fields_meta = FieldsMeta(fields_ini, dict(args.params))
 
     reader = iter(csv.reader(stdin))
     header = reader.next()
