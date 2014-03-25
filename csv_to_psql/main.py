@@ -9,6 +9,8 @@ import csv
 import sys
 import argparse
 from ConfigParser import ConfigParser
+from StringIO import StringIO
+import shutil
 
 
 class ConfigurationError(Exception):
@@ -109,7 +111,7 @@ def create_table(table_name, field_names, fields_meta, primary_key_fields):
     if primary_key_fields:
         primary_key_constraint = [
             'PRIMARY KEY ({})'.format(', '.join(primary_key_fields))
-            ]
+        ]
     else:
         primary_key_constraint = []
 
@@ -135,8 +137,8 @@ def main(argv=sys.argv[1:], stdin=sys.stdin, stdout=sys.stdout):
         fields_ini.read(args.fields_meta)
     fields_meta = FieldsMeta(fields_ini, dict(args.params))
 
-    reader = iter(csv.reader(stdin))
-    header = reader.next()
+    header_line = stdin.readline()
+    header = (csv.reader(StringIO(header_line))).next()
 
     notnullcolumns = [
         field
@@ -160,9 +162,8 @@ def main(argv=sys.argv[1:], stdin=sys.stdin, stdout=sys.stdout):
 
     stdout.write(create_and_import_sql)
 
-    writer = csv.writer(stdout)
-    writer.writerow(header)
-    writer.writerows(reader)
+    stdout.write(header_line)
+    shutil.copyfileobj(stdin, stdout)
 
 
 if __name__ == '__main__':
